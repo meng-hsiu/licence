@@ -6,8 +6,8 @@ import numpy as np
 import time  # 用於延遲
 
 # 加載車輛偵測YOLO模型和車牌偵測YOLO模型
-vehicle_model = YOLO("yolov8n.pt")
-license_plate_model = YOLO("license_plate_detector.pt")
+vehicle_model = YOLO("../yolov8n.pt")
+license_plate_model = YOLO("../license_plate_detector.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)
@@ -31,14 +31,19 @@ while cap.isOpened():
             label = vehicle_model.names[int(bbox.cls)]
 
             # 偵測到車或摩托車且準確率為0.9以上
-            if label.lower() in ['car', 'motorcycle'] and confidence >= 0.85:
+            if label.lower() in ['car', 'motorcycle'] and confidence >= 0.9:
                 detected_car_or_motorcycle = True
                 print(f"Detected {label} with confidence {confidence:.2f}")
 
                 # 延遲2秒，讓鏡頭停留在當前畫面
                 time.sleep(2)
 
-                # 延遲後使用之前擷取的影像進行車牌偵測
+                # 停留後擷取當前畫面
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # 使用車牌偵測模型進行偵測
                 license_plate_results = license_plate_model(frame)
                 detections = license_plate_results[0].boxes
 
@@ -50,6 +55,9 @@ while cap.isOpened():
 
                     # 裁剪偵測到的車牌區域
                     license_plate_img = frame[y1:y2, x1:x2]
+
+                    # 高斯模糊
+                    img_blur = cv2.GaussianBlur(license_plate_img, (3, 3), 3)
 
                     # 將裁剪的NumPy圖像轉換為PIL圖像
                     img_pil = Image.fromarray(cv2.cvtColor(license_plate_img, cv2.COLOR_BGR2RGB))
@@ -63,24 +71,40 @@ while cap.isOpened():
                     # 將圖像轉換為灰階進行OCR辨識
                     gray_plate = cv2.cvtColor(license_plate_img, cv2.COLOR_BGR2GRAY)
 
-                    # 對比度調整 去污漬之類的
+                    # 調整對比度
                     alpha = 2
                     contrast_adjusted = cv2.convertScaleAbs(gray_plate, alpha=alpha)
-                    cv2.imshow('contrast_adjusted', contrast_adjusted)
+
+                    # 使用拉普拉斯算子進行銳化
+                    sharp_img = cv2.Laplacian(gray_plate, cv2.CV_64F)
+                    sharp_img2 = cv2.convertScaleAbs(sharp_img)
 
                     # 使用pytesseract進行OCR辨識
-                    text = pytesseract.image_to_string(contrast_adjusted, lang='eng', config='--psm 11')
+                    text = pytesseract.image_to_string(gray_plate, lang='eng', config='--psm 11')
+                    text_binary = pytesseract.image_to_string(contrast_adjusted, lang='eng', config='--psm 11')
+                    text_sharp_img2 = pytesseract.image_to_string(sharp_img2, lang='eng', config='--psm 11')
 
                     # 輸出偵測到的車牌號碼
                     print(f"Detected license plate number: {text.strip()}")
+                    print(f"Detected license plate number (contrast): {text_binary.strip()}")
+                    print(f"Detected license plate number (contrast): {text_sharp_img2.strip()}")
 
+                    # 在車牌位置上顯示車牌號碼
+                    cv2.putText(frame, text_sharp_img2.strip(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                (0, 255, 0),
+                                2)
                     # 顯示影像
-                    cv2.imshow("Detected License Plate", frame)
+                    cv2.imshow("Original Frame", frame)
+                    cv2.imshow("License Plate Area", license_plate_img)
+                    cv2.imshow("Grayscale License Plate", gray_plate)
+                    cv2.imshow("Contrast Adjusted License Plate", contrast_adjusted)
 
                     # 等待鍵盤輸入並關閉視窗
                     cv2.waitKey(0)
                     cv2.destroyAllWindows()
 
+                # 重新開啟攝影機
+                cap = cv2.VideoCapture(0)
                 break
 
     # 顯示結果

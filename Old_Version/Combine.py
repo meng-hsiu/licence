@@ -3,11 +3,10 @@ from ultralytics import YOLO
 import pytesseract
 from PIL import Image
 import numpy as np
-import time  # 用於延遲
 
 # 加載車輛偵測YOLO模型和車牌偵測YOLO模型
-vehicle_model = YOLO("yolov8n.pt")
-license_plate_model = YOLO("license_plate_detector.pt")
+vehicle_model = YOLO("../yolov8n.pt")
+license_plate_model = YOLO("../license_plate_detector.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)
@@ -30,18 +29,13 @@ while cap.isOpened():
             confidence = bbox.conf[0]
             label = vehicle_model.names[int(bbox.cls)]
 
-            # 偵測到車或摩托車且準確率為0.9以上
-            if label.lower() in ['car', 'motorcycle'] and confidence >= 0.9:
+            # 偵測到車或摩托車且準確率為0.8以上
+            if label.lower() in ['car', 'motorcycle'] and confidence >= 0.85:
                 detected_car_or_motorcycle = True
                 print(f"Detected {label} with confidence {confidence:.2f}")
 
-                # 延遲2秒，讓鏡頭停留在當前畫面
-                time.sleep(2)
-
-                # 停留後擷取當前畫面
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                # 暫停攝影機擷取
+                cap.release()
 
                 # 使用車牌偵測模型進行偵測
                 license_plate_results = license_plate_model(frame)
@@ -90,8 +84,7 @@ while cap.isOpened():
                     print(f"Detected license plate number (contrast): {text_sharp_img2.strip()}")
 
                     # 在車牌位置上顯示車牌號碼
-                    cv2.putText(frame, text_sharp_img2.strip(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                (0, 255, 0),
+                    cv2.putText(frame, text_sharp_img2.strip(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0),
                                 2)
                     # 顯示影像
                     cv2.imshow("Original Frame", frame)

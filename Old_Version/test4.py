@@ -29,13 +29,13 @@ def get_angle_from_lines(lines):
 
 
 # Load pre-trained YOLO model
-model = YOLO("license_plate_detector.pt")
+model = YOLO("../license_plate_detector.pt")
 
 # Perform object detection on an image
 results = model("image2.jpg")
 
 # Load the image
-img = cv2.imread("image2.jpg")
+img = cv2.imread("../image2.jpg")
 
 # Get detected bounding boxes
 detections = results[0].boxes

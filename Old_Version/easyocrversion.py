@@ -1,17 +1,20 @@
 import cv2
 from ultralytics import YOLO
-import pytesseract
+import easyocr  # 引入 easyocr
 from PIL import Image
 import numpy as np
 import time  # 用於延遲
 import re  # 用於正則表達式
 
 # 加載車輛偵測YOLO模型和車牌偵測YOLO模型
-vehicle_model = YOLO("yolov10n.pt")
-license_plate_model = YOLO("license_plate_detector.pt")
+vehicle_model = YOLO("../yolov10n.pt")
+license_plate_model = YOLO("../license_plate_detector.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)
+
+# 初始化 easyocr Reader
+reader = easyocr.Reader(['en'])
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -31,12 +34,8 @@ while cap.isOpened():
             confidence = bbox.conf[0]
             label = vehicle_model.names[int(bbox.cls)]
 
-            # 偵測到車或摩托車且準確率為0.9以上
+            # 偵測到車或摩托車且準確率為0.85以上
             if label.lower() in ['car', 'motorcycle'] and confidence >= 0.85:
-                if label.lower() in ['car']:
-                    print('car')
-                else:
-                    print('motorcycle')
                 detected_car_or_motorcycle = True
                 print(f"Detected {label} with confidence {confidence:.2f}")
 
@@ -79,39 +78,56 @@ while cap.isOpened():
                     # 旋轉車牌影像，使其變正
                     center = (license_plate_img.shape[1] // 2, license_plate_img.shape[0] // 2)
                     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                    rotated_plate = cv2.warpAffine(license_plate_img, M, (license_plate_img.shape[1], license_plate_img.shape[0]))
+                    rotated_plate = cv2.warpAffine(gray_plate, M, (license_plate_img.shape[1], license_plate_img.shape[0]))
 
                     # 調整對比度
-                    alpha = 1.5
-                    contrast_adjusted = cv2.convertScaleAbs(rotated_plate, alpha=alpha)
+                    alpha = 2
+                    beta = 0
+                    contrast_adjusted = cv2.convertScaleAbs(rotated_plate, alpha=alpha, beta=beta)
 
-                    # OCR識別前的圖像處理
-                    # sharp_img = cv2.Laplacian(gray_plate, cv2.CV_64F)
-                    # sharp_img2 = cv2.convertScaleAbs(sharp_img)
+                    # 定義侵蝕核
+                    kernel = np.ones((4, 4), np.uint8)
 
-                    _, binary_image = cv2.threshold(contrast_adjusted, 180, 255, cv2.THRESH_BINARY)
+                    # 侵蝕處理
+                    eroded = cv2.erode(contrast_adjusted, kernel, iterations=1)
 
-                    # 使用pytesseract進行OCR辨識
-                    text = pytesseract.image_to_string(rotated_plate, lang='eng', config='--psm 11')
-                    text_con = pytesseract.image_to_string(contrast_adjusted, lang='eng', config='--psm 11')
-                    text_binary = pytesseract.image_to_string(binary_image, lang='eng', config='--psm 11')
+                    # 調整對比度第二次
+                    contrast_adjusted2 = cv2.convertScaleAbs(eroded, alpha=alpha, beta=beta)
+
+                    # 使用 easyocr 進行OCR辨識
+                    results = reader.readtext(eroded)
+                    text_eroded = ''.join([res[1] for res in results])
+
+                    # 使用 easyocr 進行 OCR 辨識
+                    results = reader.readtext(rotated_plate)
+                    text_rotated = ''.join([res[1] for res in results])
+
+                    results = reader.readtext(contrast_adjusted)
+                    text_contrast_adjusted = ''.join([res[1] for res in results])
+
+                    results = reader.readtext(contrast_adjusted2)
+                    text_contrast_adjusted2 = ''.join([res[1] for res in results])
 
                     # 正規化 去除不是A~Z或0~9的字
-                    filtered_text = re.sub(r'[^A-Z0-9]', '', text.strip())
-                    filtered_text_con = re.sub(r'[^A-Z0-9]', '', text_con.strip())
-                    filtered_text_binary = re.sub(r'[^A-Z0-9]', '', text_binary.strip())
+                    filtered_text_rotated = re.sub(r'[^A-Z0-9]', '', text_rotated.strip())
+                    filtered_text_contrast_adjusted = re.sub(r'[^A-Z0-9]', '', text_contrast_adjusted.strip())
+                    filtered_text_contrast_adjusted2 = re.sub(r'[^A-Z0-9]', '', text_contrast_adjusted2.strip())
+                    filtered_text_eroded = re.sub(r'[^A-Z0-9]', '', text_eroded.strip())
 
                     # 輸出偵測到的車牌號碼
-                    print(f"Detected license plate number gray: {filtered_text.strip()}")
-                    print(f"Detected license plate number con: {filtered_text_con.strip()}")
-                    print(f"Detected license plate number binary: {filtered_text_binary.strip()}")
+                    print(f"Detected license plate number rotated: {filtered_text_rotated.strip()}")
+                    print(f"Detected license plate number contrast_adjusted: {filtered_text_contrast_adjusted.strip()}")
+                    print(f"Detected license plate number contrast_adjusted2: {filtered_text_contrast_adjusted2.strip()}")
+                    print(f"Detected license plate number eroded: {filtered_text_eroded.strip()}")
 
                     # 在車牌位置上顯示車牌號碼
-                    cv2.putText(frame, text.strip(), (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    cv2.putText(frame, text_con.strip(), (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(frame, filtered_text_rotated, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(frame, filtered_text_contrast_adjusted, (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(frame, filtered_text_contrast_adjusted2, (x1 - 20, y1 - 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.putText(frame, filtered_text_eroded, (x1 - 60, y1 - 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
                     # 顯示影像
-                    cv2.imshow("binary_image", binary_image)
+                    cv2.imshow("eroded", eroded)
                     cv2.imshow("contrast_adjusted", contrast_adjusted)
                     cv2.imshow("Rotated License Plate", rotated_plate)
                     cv2.imshow("Original Frame", frame)
@@ -124,7 +140,7 @@ while cap.isOpened():
                 cap = cv2.VideoCapture(0)
                 break
 
-    # 顯示結果
+        # 顯示結果
         cv2.imshow('YOLO Webcam Detection with License Plate Recognition', annotated_frame)
 
     # 按 'q' 鍵退出

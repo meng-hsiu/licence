@@ -5,10 +5,10 @@ import numpy as np
 import cv2
 
 # Load the YOLO model
-model = YOLO("license_plate_detector.pt")
+model = YOLO("../license_plate_detector.pt")
 
 # Load the image using OpenCV
-img_read = cv2.imread("image.jpg")
+img_read = cv2.imread("../image.jpg")
 
 # Convert the OpenCV image (NumPy array) to a PIL image
 img_pil = Image.fromarray(cv2.cvtColor(img_read, cv2.COLOR_BGR2RGB))

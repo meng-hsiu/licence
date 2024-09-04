@@ -65,7 +65,7 @@ model = YOLO("car.pt")
 results = model("motor.jpg")
 
 # Load the image
-img = cv2.imread("motor.jpg")
+img = cv2.imread("../motor.jpg")
 
 # Get detected bounding boxes
 detections = results[0].boxes

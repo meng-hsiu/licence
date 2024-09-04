@@ -3,7 +3,7 @@ from ultralytics import YOLO
 import pytesseract
 # 加載預訓練的YOLO模型
 '''model = YOLO('yolov8n.pt')'''  # 可以換成專門訓練過的車牌偵測模型
-model = YOLO("yolov8n.pt")
+model = YOLO("../yolov8n.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)

@@ -49,13 +49,13 @@ def crop_extra_borders(image):
     return cropped_image
 
 # Load pre-trained YOLO model
-model = YOLO("license_plate_detector.pt")
+model = YOLO("../license_plate_detector.pt")
 
 # Perform object detection on an image
 results = model("motor.jpg")
 
 # Load the image
-img = cv2.imread("motor.jpg")
+img = cv2.imread("../motor.jpg")
 
 # Get detected bounding boxes
 detections = results[0].boxes

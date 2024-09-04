@@ -7,8 +7,8 @@ import re  # 用於正則表達式
 import os  # 用於儲存影像
 
 # 加載車輛偵測YOLO模型和車牌偵測YOLO模型
-vehicle_model = YOLO("yolov10n.pt")
-license_plate_model = YOLO("license_plate_detector.pt")
+vehicle_model = YOLO("../yolov10n.pt")
+license_plate_model = YOLO("../license_plate_detector.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)
@@ -20,7 +20,7 @@ reader = easyocr.Reader(['en'])
 recognition_enabled = False
 
 def save_image(image, filename):
-    path = os.path.join("detected_plates", filename)
+    path = os.path.join("../detected_plates", filename)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, image)
     print(f"Image saved as {filename}")
