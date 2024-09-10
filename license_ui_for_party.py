@@ -13,6 +13,7 @@ from ultralytics import YOLO
 import easyocr
 import re
 import os
+import sys
 import pyodbc
 from datetime import datetime
 
@@ -37,13 +38,30 @@ class Ui_Dialog(object):
 
 class VideoCaptureThread(QThread):
     text_detected = pyqtSignal(str)
+    # 加入判斷式 如果是打包後就用相對,如果是開發模式就絕對路徑
+    if getattr(sys, 'frozen', False):
+        # 如果是打包後的應用，使用 _MEIPASS
+        base_path = sys._MEIPASS
+    else:
+        # 如果是開發模式，使用當前腳本目錄
+        base_path = os.path.dirname(__file__)
 
-    vehicle_model = YOLO("yolov10n.pt")
-    license_plate_model = YOLO("license_plate_detector.pt")
+    vehicle_model_path = os.path.join(base_path, 'yolov10n.pt')
+    license_plate_model_path = os.path.join(base_path, 'license_plate_detector.pt')
+
+    vehicle_model = YOLO(vehicle_model_path)
+    license_plate_model = YOLO(license_plate_model_path)
 
     @staticmethod
     def save_image(image, filename):
-        path = os.path.join("detected_plates", filename)
+        if getattr(sys, 'frozen', False):
+            # 如果是打包後的應用，使用 _MEIPASS
+            base_path = sys._MEIPASS
+        else:
+            # 如果是開發模式，使用當前腳本目錄
+            base_path = os.path.dirname(__file__)
+
+        path = os.path.join(base_path, "detected_plates", filename)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         cv2.imwrite(path, image)
 
