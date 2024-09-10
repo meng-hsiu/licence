@@ -14,7 +14,6 @@ import easyocr
 import re
 import os
 import pyodbc
-from datetime import datetime
 
 class Ui_Dialog(object):
     def setupUi(self, Dialog):
@@ -104,113 +103,6 @@ class VideoCaptureThread(QThread):
                                     print(
                                         f"Detected {label} with confidence {confidence:.2f} AND OCR detected text: {filtered_text} with confidence {ocr_confidence:.2f}")
                                     self.text_detected.emit(filtered_text)  # 使用 self.text_detected.emit
-
-                                    # 連線到資料庫
-                                    conn = pyodbc.connect(
-                                        "DRIVER={ODBC Driver 17 for SQL Server};"
-                                        "SERVER=localhost;"
-                                        "DATABASE=MyGoParking;"
-                                        "Trusted_Connection=yes;"
-                                    )
-                                    cursor = conn.cursor()
-                                    # 先搜尋看看有沒有已經存在的車牌且Exit是小於1900年,如果有,代表他已經進場了,而且也不會搜尋到其他筆 因為同一個車牌號碼不會同時進場兩次,所以肯定有一個是出場
-                                    query_start = "SELECT * FROM EntryExitManagement where license_plate_photo = ? AND exit_time < '1900';"
-                                    cursor.execute(query_start, filtered_text+".png")
-                                    row = cursor.fetchone()
-                                    # 紀錄當前時間 以用來確認月租或者是預訂有沒有超時 和 拿來寫入進出場時間
-                                    time_now = datetime.now()
-                                    # 如果是row是True代表他有在
-                                    if row:
-                                        is_payment = row.payment_status
-                                        entryexit_id = row.entryexit_id
-                                        if is_payment:
-                                            query_Exit = "UPDATE EntryExitManagement SET exit_time = ? where entryexit_id = ?;"
-                                            cursor.execute(query_Exit, time_now, entryexit_id)
-                                            conn.commit()
-                                            self.text_detected.emit("謝謝光臨")
-                                            cursor.close()
-                                            conn.close()
-                                            break
-                                        else:
-                                            self.text_detected.emit("尚未完成付款動作")
-                                            cursor.close()
-                                            conn.close()
-                                            break
-                                    else:
-                                        car_id = 0
-                                        parktype = ""
-                                        # 確認是否有月租
-                                        query = "SELECT * FROM MonthlyRental as M JOIN Car as C on C.car_id = M.car_id WHERE lot_id=? AND license_plate = ? AND M.payment_status = 1 ORDER BY M.end_date DESC;"
-                                        # 預設我的停車都是前金 所以lot_id是1
-                                        cursor.execute(query, 1, filtered_text)
-                                        is_m = False
-                                        is_overtime_m = False
-                                        row = cursor.fetchone()
-                                        if row:
-                                            is_m = True
-                                            car_id = row.car_id
-                                            end_time = row.end_date
-                                            if end_time > time_now:
-                                                parktype = "MonthlyRental"
-                                                query_insert_m = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time,exit_time) VALUES (?, ?, ?, ?, ?,?);"
-                                                cursor.execute(query_insert_m, 1, car_id, parktype, filtered_text + ".png", time_now, '1800')
-                                                conn.commit()
-                                                cursor.close()
-                                                conn.close()
-                                                self.text_detected.emit(filtered_text+"歡迎光臨")
-                                                break
-                                            else:
-                                                self.text_detected.emit("合約過期，或是尚未繳費")
-                                                cursor.close()
-                                                conn.close()
-                                                break
-                                        # 確認是否有預定 而且要選擇還未完成的預訂訂單
-                                        query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 ORDER BY valid_until;"
-                                        cursor.execute(query2, 1, filtered_text)
-                                        row = cursor.fetchone()
-                                        # 用來儲存預定ID 因為要幫這筆改成finished
-                                        res_id = 0
-                                        is_r = False
-                                        is_overtime_r = False
-                                        if row:
-                                            is_r = True
-                                            car_id = row.car_id
-                                            parktype = "Reservation"
-                                            # 用來儲存如果他有預定的話 要對預訂進行更動
-                                            res_id = row.res_id
-                                            valid_until = row.valid_until
-                                            car_id = row.car_id
-                                            # 更動預定資料表 表示他已完成
-                                            if time_now > valid_until:
-                                                query_is_finished = "UPDATE Reservation SET is_finish = ? WHERE res_id = ?;"
-                                                cursor.execute(query_is_finished, 1, res_id)
-                                                conn.commit()
-                                                # 新增資料在出入管理
-                                                query_insert_r = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time,exit_time) VALUES (?, ?, ?, ?, ?,?); "
-                                                cursor.execute(query_insert_r, 1, car_id, parktype, filtered_text+".png", time_now, '1800')
-                                                conn.commit()
-                                                self.text_detected.emit("歡迎光臨")
-                                                cursor.close()
-                                                conn.close()
-                                                break
-                                            else:
-                                                is_overtime_r = True
-                                                query_overtime = "UPDATE Reservation SET is_finish = ?,is_overdue = ? WHERE res_id = ?;"
-                                                cursor.execute(query_overtime, 1, 1, res_id)
-                                                conn.commit()
-                                                self.text_detected.emit("已逾時,請重新預定")
-                                                cursor.close()
-                                                conn.close()
-                                                break
-                                        # 下面那行同理這個意思 if is_m == False and is_r == False: 只是不夠Pythonic
-                                        if not is_m and not is_r:
-                                            self.text_detected.emit("沒有預定或月租,請重新確認")
-                                        elif not is_overtime_r:
-                                            self.text_detected.emit("預定時間已超時")
-
-
-
-
                                 cv2.putText(frame, filtered_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
                                             (0, 255, 0), 2)
 

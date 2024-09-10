@@ -67,6 +67,7 @@ class VideoCaptureThread(QThread):
                 key = cv2.waitKey(1)
                 if key == ord('r'):
                     pause_detection = False
+                    self.text_detected.emit("正在等待偵測...")
                 continue
 
             results = self.vehicle_model(frame)
@@ -130,12 +131,10 @@ class VideoCaptureThread(QThread):
                                             self.text_detected.emit("謝謝光臨")
                                             cursor.close()
                                             conn.close()
-                                            break
                                         else:
                                             self.text_detected.emit("尚未完成付款動作")
                                             cursor.close()
                                             conn.close()
-                                            break
                                     else:
                                         car_id = 0
                                         parktype = ""
@@ -158,12 +157,10 @@ class VideoCaptureThread(QThread):
                                                 cursor.close()
                                                 conn.close()
                                                 self.text_detected.emit(filtered_text+"歡迎光臨")
-                                                break
                                             else:
                                                 self.text_detected.emit("合約過期，或是尚未繳費")
                                                 cursor.close()
                                                 conn.close()
-                                                break
                                         # 確認是否有預定 而且要選擇還未完成的預訂訂單
                                         query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 ORDER BY valid_until;"
                                         cursor.execute(query2, 1, filtered_text)
@@ -178,21 +175,21 @@ class VideoCaptureThread(QThread):
                                             parktype = "Reservation"
                                             # 用來儲存如果他有預定的話 要對預訂進行更動
                                             res_id = row.res_id
-                                            valid_until = row.valid_until
+                                            is_overdue = row.is_overdue
                                             car_id = row.car_id
                                             # 更動預定資料表 表示他已完成
-                                            if time_now > valid_until:
+                                            if not is_overdue:
                                                 query_is_finished = "UPDATE Reservation SET is_finish = ? WHERE res_id = ?;"
                                                 cursor.execute(query_is_finished, 1, res_id)
                                                 conn.commit()
                                                 # 新增資料在出入管理
                                                 query_insert_r = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time,exit_time) VALUES (?, ?, ?, ?, ?,?); "
                                                 cursor.execute(query_insert_r, 1, car_id, parktype, filtered_text+".png", time_now, '1800')
+                                                # 我先預設一個出場時間是1800年 所以在進出場時會多一個判斷 如果我抓到出場時間是<1900 那我就會判斷他是進場中的車子
                                                 conn.commit()
                                                 self.text_detected.emit("歡迎光臨")
                                                 cursor.close()
                                                 conn.close()
-                                                break
                                             else:
                                                 is_overtime_r = True
                                                 query_overtime = "UPDATE Reservation SET is_finish = ?,is_overdue = ? WHERE res_id = ?;"
@@ -201,11 +198,10 @@ class VideoCaptureThread(QThread):
                                                 self.text_detected.emit("已逾時,請重新預定")
                                                 cursor.close()
                                                 conn.close()
-                                                break
                                         # 下面那行同理這個意思 if is_m == False and is_r == False: 只是不夠Pythonic
                                         if not is_m and not is_r:
                                             self.text_detected.emit("沒有預定或月租,請重新確認")
-                                        elif not is_overtime_r:
+                                        elif is_overtime_r:
                                             self.text_detected.emit("預定時間已超時")
 
 
