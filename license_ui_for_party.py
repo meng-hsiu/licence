@@ -16,6 +16,7 @@ import os
 import sys
 import pyodbc
 from datetime import datetime
+import torch
 
 class Ui_Dialog(object):
     def setupUi(self, Dialog):
@@ -46,11 +47,16 @@ class VideoCaptureThread(QThread):
         # 如果是開發模式，使用當前腳本目錄
         base_path = os.path.dirname(__file__)
 
+
+    # 檢查是否有可用的 GPU
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     vehicle_model_path = os.path.join(base_path, 'yolov10n.pt')
     license_plate_model_path = os.path.join(base_path, 'license_plate_detector.pt')
 
-    vehicle_model = YOLO(vehicle_model_path)
-    license_plate_model = YOLO(license_plate_model_path)
+    # 加載車輛模型和車牌模型時指定設備
+    vehicle_model = YOLO(vehicle_model_path).to(device)
+    license_plate_model = YOLO(license_plate_model_path).to(device)
 
     @staticmethod
     def save_image(image, filename):
@@ -99,7 +105,8 @@ class VideoCaptureThread(QThread):
                     if label.lower() in ['car', 'motorcycle'] and confidence >= 0.75:
                         detected_car_or_motorcycle = True
 
-                        license_plate_results = self.license_plate_model(frame)
+                        # 車牌偵測時指定設備
+                        license_plate_results = self.license_plate_model(frame, device=self.device)
                         detections = license_plate_results[0].boxes
 
                         for box in detections:
@@ -156,7 +163,7 @@ class VideoCaptureThread(QThread):
                                     else:
                                         car_id = 0
                                         parktype = ""
-                                        # 確認是否有月租
+                                        # 確認是否有月租 篩選條件, 停車場編號, 車牌編號, 有沒有付錢, 如果有同時符合選最新的那筆
                                         query = "SELECT * FROM MonthlyRental as M JOIN Car as C on C.car_id = M.car_id WHERE lot_id=? AND license_plate = ? AND M.payment_status = 1 ORDER BY M.end_date DESC;"
                                         # 預設我的停車都是前金 所以lot_id是1
                                         cursor.execute(query, 1, filtered_text)
@@ -174,13 +181,13 @@ class VideoCaptureThread(QThread):
                                                 conn.commit()
                                                 cursor.close()
                                                 conn.close()
-                                                self.text_detected.emit(filtered_text+"歡迎光臨")
+                                                self.text_detected.emit(f"歡迎光臨,{filtered_text}")
                                             else:
                                                 self.text_detected.emit("合約過期，或是尚未繳費")
                                                 cursor.close()
                                                 conn.close()
-                                        # 確認是否有預定 而且要選擇還未完成的預訂訂單
-                                        query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 ORDER BY valid_until;"
+                                        # 確認是否有預定 而且要選擇還未完成的預訂訂單 篩選條件停車場編號, 車牌, 有沒有完成, 有沒有付錢, 如果有兩筆都符合這些條件挑最舊的那筆
+                                        query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 AND R.payment_status = 1 ORDER BY valid_until;"
                                         cursor.execute(query2, 1, filtered_text)
                                         row = cursor.fetchone()
                                         # 用來儲存預定ID 因為要幫這筆改成finished
@@ -205,7 +212,7 @@ class VideoCaptureThread(QThread):
                                                 cursor.execute(query_insert_r, 1, car_id, parktype, filtered_text+".png", time_now, '1800')
                                                 # 我先預設一個出場時間是1800年 所以在進出場時會多一個判斷 如果我抓到出場時間是<1900 那我就會判斷他是進場中的車子
                                                 conn.commit()
-                                                self.text_detected.emit("歡迎光臨")
+                                                self.text_detected.emit(f"歡迎光臨,{filtered_text}")
                                                 cursor.close()
                                                 conn.close()
                                             else:
