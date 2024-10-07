@@ -47,6 +47,10 @@ class VideoCaptureThread(QThread):
         # 如果是開發模式，使用當前腳本目錄
         base_path = os.path.dirname(__file__)
 
+    def __init__(self):
+        super().__init__()
+        self.last_detected_text = None  # 初始化最近偵測的文字
+        self.pause_detection = False
 
     # 檢查是否有可用的 GPU
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -91,10 +95,11 @@ class VideoCaptureThread(QThread):
                 key = cv2.waitKey(1)
                 if key == ord('r'):
                     pause_detection = False
+                    self.last_detected_text = None
                     self.text_detected.emit("正在等待偵測...")
                 continue
 
-            results = self.vehicle_model(frame)
+            results = self.vehicle_model(frame, device=self.device)
             detected_car_or_motorcycle = False
 
             for result in results:
@@ -125,11 +130,13 @@ class VideoCaptureThread(QThread):
                                 filtered_text = re.sub(r'[^A-Z0-9]', '', text.strip())
 
                                 if ocr_confidence > 0.8 and 6 <= len(filtered_text) <= 7:
-                                    self.save_image(frame, f"{filtered_text}.png")
-                                    pause_detection = True
-                                    print(
-                                        f"Detected {label} with confidence {confidence:.2f} AND OCR detected text: {filtered_text} with confidence {ocr_confidence:.2f}")
-                                    self.text_detected.emit(filtered_text)  # 使用 self.text_detected.emit
+                                    # 只有在新的車牌號碼不同於最近的結果時，才執行以下代碼
+                                    if filtered_text != self.last_detected_text:
+                                        self.last_detected_text = filtered_text  # 更新最近的偵測結果
+                                        self.save_image(frame, f"{filtered_text}.png")
+                                        pause_detection = True
+                                        print(
+                                            f"Detected {label} with confidence {confidence:.2f} AND OCR detected text: {filtered_text} with confidence {ocr_confidence:.2f}")
 
                                     # 連線到資料庫
                                     conn = pyodbc.connect(
@@ -139,8 +146,9 @@ class VideoCaptureThread(QThread):
                                         "Trusted_Connection=yes;"
                                     )
                                     cursor = conn.cursor()
-                                    # 先搜尋看看有沒有已經存在的車牌且Exit是小於1900年,如果有,代表他已經進場了,而且也不會搜尋到其他筆 因為同一個車牌號碼不會同時進場兩次,所以肯定有一個是出場
-                                    query_start = "SELECT * FROM EntryExitManagement where license_plate_photo = ? AND exit_time < '1900';"
+                                    # 先搜尋看看有沒有已經存在的車牌且Exit是空值,如果有,代表他已經進場了
+                                    # 而且也不會搜尋到其他筆 因為同一個車牌號碼不會同時進場兩次, 也不會發生不同停車場有同一個車牌號碼, 所以肯定有一個是出場
+                                    query_start = "SELECT * FROM EntryExitManagement where license_plate_photo = ? AND exit_time is Null ;"
                                     cursor.execute(query_start, filtered_text+".png")
                                     row = cursor.fetchone()
                                     # 紀錄當前時間 以用來確認月租或者是預訂有沒有超時 和 拿來寫入進出場時間
@@ -176,8 +184,8 @@ class VideoCaptureThread(QThread):
                                             end_time = row.end_date
                                             if end_time > time_now:
                                                 parktype = "MonthlyRental"
-                                                query_insert_m = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time,exit_time) VALUES (?, ?, ?, ?, ?,?);"
-                                                cursor.execute(query_insert_m, 1, car_id, parktype, filtered_text + ".png", time_now, '1800')
+                                                query_insert_m = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time) VALUES (?, ?, ?, ?, ?);"
+                                                cursor.execute(query_insert_m, 1, car_id, parktype, filtered_text + ".png", time_now)
                                                 conn.commit()
                                                 cursor.close()
                                                 conn.close()
@@ -187,7 +195,7 @@ class VideoCaptureThread(QThread):
                                                 cursor.close()
                                                 conn.close()
                                         # 確認是否有預定 而且要選擇還未完成的預訂訂單 篩選條件停車場編號, 車牌, 有沒有完成, 有沒有付錢, 如果有兩筆都符合這些條件挑最舊的那筆
-                                        query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 AND R.payment_status = 1 ORDER BY valid_until;"
+                                        query2 = "SELECT * FROM Reservation as R JOIN Car as C on C.car_id = R.car_id WHERE lot_id=? AND license_plate=? AND R.is_finish=0 AND R.deposit_status = 1 ORDER BY valid_until;"
                                         cursor.execute(query2, 1, filtered_text)
                                         row = cursor.fetchone()
                                         # 用來儲存預定ID 因為要幫這筆改成finished
@@ -208,8 +216,8 @@ class VideoCaptureThread(QThread):
                                                 cursor.execute(query_is_finished, 1, res_id)
                                                 conn.commit()
                                                 # 新增資料在出入管理
-                                                query_insert_r = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time,exit_time) VALUES (?, ?, ?, ?, ?,?); "
-                                                cursor.execute(query_insert_r, 1, car_id, parktype, filtered_text+".png", time_now, '1800')
+                                                query_insert_r = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time) VALUES (?, ?, ?, ?, ?); "
+                                                cursor.execute(query_insert_r, 1, car_id, parktype, filtered_text+".png", time_now)
                                                 # 我先預設一個出場時間是1800年 所以在進出場時會多一個判斷 如果我抓到出場時間是<1900 那我就會判斷他是進場中的車子
                                                 conn.commit()
                                                 self.text_detected.emit(f"歡迎光臨,{filtered_text}")
