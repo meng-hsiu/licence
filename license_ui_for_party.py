@@ -53,14 +53,17 @@ class VideoCaptureThread(QThread):
         self.pause_detection = False
 
     # 檢查是否有可用的 GPU
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        print("無法使用, 效率會變很差")
 
     vehicle_model_path = os.path.join(base_path, 'yolov10n.pt')
     license_plate_model_path = os.path.join(base_path, 'license_plate_detector.pt')
 
     # 加載車輛模型和車牌模型時指定設備
-    vehicle_model = YOLO(vehicle_model_path).to(device)
-    license_plate_model = YOLO(license_plate_model_path).to(device)
+    vehicle_model = YOLO(vehicle_model_path, verbose=False).to(device)
+    license_plate_model = YOLO(license_plate_model_path, verbose=False).to(device)
 
     @staticmethod
     def save_image(image, filename):
@@ -99,7 +102,7 @@ class VideoCaptureThread(QThread):
                     self.text_detected.emit("正在等待偵測...")
                 continue
 
-            results = self.vehicle_model(frame, device=self.device)
+            results = self.vehicle_model(frame, verbose=False, device=self.device)
             detected_car_or_motorcycle = False
 
             for result in results:
@@ -111,7 +114,7 @@ class VideoCaptureThread(QThread):
                         detected_car_or_motorcycle = True
 
                         # 車牌偵測時指定設備
-                        license_plate_results = self.license_plate_model(frame, device=self.device)
+                        license_plate_results = self.license_plate_model(frame, verbose=False, device=self.device)
                         detections = license_plate_results[0].boxes
 
                         for box in detections:
@@ -236,12 +239,7 @@ class VideoCaptureThread(QThread):
                                             self.text_detected.emit("沒有預定或月租,請重新確認")
                                         elif is_overtime_r:
                                             self.text_detected.emit("預定時間已超時")
-
-
-
-
-                                cv2.putText(frame, filtered_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                                            (0, 255, 0), 2)
+                                cv2.putText(frame, filtered_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1,(0, 255, 0), 2)
 
             cv2.imshow('YOLO Webcam Detection with License Plate Recognition', frame)
 
@@ -253,6 +251,7 @@ class VideoCaptureThread(QThread):
 
 if __name__ == "__main__":
     import sys
+    from PyQt6.QtWidgets import QMessageBox
     app = QtWidgets.QApplication(sys.argv)
     Dialog = QtWidgets.QDialog()
     ui = Ui_Dialog()
@@ -267,8 +266,15 @@ if __name__ == "__main__":
 
     video_thread.text_detected.connect(update_label)
 
-    # 啟動線程
-    video_thread.start()
+    try:
+        # 啟動線程
+        video_thread.start()
+        Dialog.show()
 
-    Dialog.show()
-    sys.exit(app.exec())
+        # 這裡是運行Qt的事件循環
+        sys.exit(app.exec())
+    except Exception as e:
+        # 捕獲所有異常
+        QMessageBox.critical(Dialog, "Error", f"An error occurred: {str(e)}")
+        # 確保以非正常狀態退出
+        sys.exit(1)
