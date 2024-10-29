@@ -56,14 +56,14 @@ class VideoCaptureThread(QThread):
     def run(self):
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            print("Error: Cannot open webcam")
+            print("Error: 沒辦法打開webcam")
             return
 
         reader = easyocr.Reader(['en'])
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
-                print("Error: Cannot read frame")
+                print("Error: 讀取不到影像")
                 break
 
             if self.pause_detection:
@@ -116,7 +116,7 @@ class VideoCaptureThread(QThread):
 
                 self.pause_detection = True
                 print(f"Detected {filtered_text} with confidence {confidence:.2f}")
-                cv2.imshow("偵測到的車牌畫面", frame)
+                cv2.imshow("Detect frame of the car license", frame)
                 self.handle_database_interaction(filtered_text, frame)
                 return True
         return False
@@ -156,9 +156,8 @@ class VideoCaptureThread(QThread):
         row = cursor.fetchone()
 
         if row and row.end_date > time_now:
-            self.insert_entry(cursor, plate_text, time_now, "MonthlyRental")
+            self.insert_entry(cursor, plate_text, time_now, "MonthlyRental", frame)
             self.text_detected.emit(f"歡迎光臨, {plate_text}")
-            self.save_image(frame, f"{plate_text}.png")
         elif row:
             self.text_detected.emit("合約過期，或是尚未繳費")
         else:
@@ -181,7 +180,7 @@ class VideoCaptureThread(QThread):
         cursor.execute(
             "INSERT INTO EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time) VALUES (?, ?, ?, ?, ?);",
             1, cursor.fetchone().car_id, parktype, plate_text + ".png", time_now)
-        self.save_image(frame, f"{plate_text}.png")
+        self.save_image(frame, f"{plate_text}_{time_now}.png")
         print("plate_text"+plate_text)
         cursor.connection.commit()
 
