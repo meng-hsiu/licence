@@ -207,7 +207,6 @@ class VideoCaptureThread(QThread):
                                         is_overtime_r = False
                                         if row:
                                             is_r = True
-                                            car_id = row.car_id
                                             parktype = "Reservation"
                                             # 用來儲存如果他有預定的話 要對預訂進行更動
                                             res_id = row.res_id
