@@ -48,7 +48,13 @@ class VideoCaptureThread(QThread):
 
     @staticmethod
     def save_image(image, filename):
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+        if getattr(sys, 'frozen', False):
+            # 如果是打包後的應用，使用 _MEIPASS
+            base_path = sys._MEIPASS
+        else:
+            # 如果是開發模式，使用當前腳本目錄
+            base_path = os.path.dirname(__file__)
+
         path = os.path.join(base_path, "detected_plates", filename)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         cv2.imwrite(path, image)
@@ -116,7 +122,6 @@ class VideoCaptureThread(QThread):
 
                 self.pause_detection = True
                 print(f"Detected {filtered_text} with confidence {confidence:.2f}")
-                cv2.imshow("Detect frame of the car license", frame)
                 self.handle_database_interaction(filtered_text, frame)
                 return True
         return False
@@ -156,7 +161,7 @@ class VideoCaptureThread(QThread):
         row = cursor.fetchone()
 
         if row and row.end_date > time_now:
-            self.insert_entry(cursor, plate_text, time_now, "MonthlyRental", frame)
+            self.insert_entry(cursor, plate_text, time_now, "MonthlyRental", frame, row.car_id)
             self.text_detected.emit(f"歡迎光臨, {plate_text}")
         elif row:
             self.text_detected.emit("合約過期，或是尚未繳費")
@@ -168,7 +173,7 @@ class VideoCaptureThread(QThread):
 
             if row and not row.is_overdue:
                 cursor.execute("UPDATE Reservation SET is_finish = 1 WHERE res_id = ?", row.res_id)
-                self.insert_entry(cursor, plate_text, time_now, "Reservation", frame)
+                self.insert_entry(cursor, plate_text, time_now, "Reservation", frame, row.car_id)
                 self.text_detected.emit(f"歡迎光臨, {plate_text}")
             elif row:
                 cursor.execute("UPDATE Reservation SET is_finish = 1, is_overdue = 1 WHERE res_id = ?", row.res_id)
@@ -176,12 +181,17 @@ class VideoCaptureThread(QThread):
             else:
                 self.text_detected.emit("沒有預定或月租,請重新確認")
 
-    def insert_entry(self, cursor, plate_text, time_now, parktype, frame):
+    def insert_entry(self, cursor, plate_text, time_now, parktype, frame, car_id):
+        str_time_now = time_now.strftime("%Y%m%d_%H%M%S")
         cursor.execute(
             "INSERT INTO EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time) VALUES (?, ?, ?, ?, ?);",
-            1, cursor.fetchone().car_id, parktype, plate_text + ".png", time_now)
-        self.save_image(frame, f"{plate_text}_{time_now}.png")
-        print("plate_text"+plate_text)
+            1, car_id, parktype, f"{plate_text}_{str_time_now}.png", time_now)
+        self.save_image(frame, f"{plate_text}_{str_time_now}.png")
+        cv2.imshow("testtest", frame)
+        # print("資料型態:", frame.dtype)
+        # print("物件類型:", type(frame))
+        # print("影像維度:", frame.shape)
+        # print("plate_text"+plate_text)
         cursor.connection.commit()
 
 

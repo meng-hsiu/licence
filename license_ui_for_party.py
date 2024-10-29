@@ -190,8 +190,8 @@ class VideoCaptureThread(QThread):
                                                 query_insert_m = "INSERT EntryExitManagement (lot_id, car_id, parktype, license_plate_photo,entry_time) VALUES (?, ?, ?, ?, ?);"
                                                 cursor.execute(query_insert_m, 1, car_id, parktype, filtered_text + ".png", time_now)
                                                 conn.commit()
-                                                cursor.close()
-                                                conn.close()
+                                                # cursor.close()
+                                                # conn.close()
                                                 self.text_detected.emit(f"歡迎光臨,{filtered_text}")
                                             else:
                                                 self.text_detected.emit("合約過期，或是尚未繳費")
