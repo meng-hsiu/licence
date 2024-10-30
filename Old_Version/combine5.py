@@ -7,8 +7,8 @@ import time  # 用於延遲
 import re  # 用於正則表達式
 
 # 加載車輛偵測YOLO模型和車牌偵測YOLO模型
-vehicle_model = YOLO("yolov10n.pt")
-license_plate_model = YOLO("license_plate_detector.pt")
+vehicle_model = YOLO("../yolov10n.pt")
+license_plate_model = YOLO("../license_plate_detector.pt")
 
 # 開啟攝像頭
 cap = cv2.VideoCapture(0)
