@@ -83,6 +83,7 @@ class VideoCaptureThread(QThread):
             if self.detect_vehicle(frame, reader):
                 continue
 
+            # cv2 沒辦法直接打打中文...
             cv2.imshow('YOLO Webcam Detection with License Plate Recognition', frame)
             if cv2.waitKey(1) == ord('q'):
                 break
@@ -114,12 +115,10 @@ class VideoCaptureThread(QThread):
         for res in results:
             text, confidence = res[1], res[2]
             filtered_text = re.sub(r'[^A-Z0-9]', '', text.strip())
+            cv2.putText(frame, filtered_text, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
             if confidence > 0.8 and 6 <= len(filtered_text) <= 7 and filtered_text != self.last_detected_text:
                 self.last_detected_text = filtered_text
-
-                cv2.putText(frame, filtered_text, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
                 self.pause_detection = True
                 print(f"Detected {filtered_text} with confidence {confidence:.2f}")
                 self.handle_database_interaction(filtered_text, frame)
@@ -132,12 +131,13 @@ class VideoCaptureThread(QThread):
         cursor = conn.cursor()
         time_now = datetime.now()
 
-        # Check entry or exit status
-        query_start = "SELECT * FROM EntryExitManagement WHERE license_plate_photo = ? AND exit_time IS NULL;"
-        cursor.execute(query_start, plate_text + ".png")
+        # 檢查出入管理內有沒有已經存在了, 已經存在的話就是出場
+        query_start = "SELECT * FROM EntryExitManagement WHERE license_plate_photo Like ? AND exit_time IS NULL;"
+        cursor.execute(query_start, f"{plate_text}_%.png")
         row = cursor.fetchone()
 
         if row:
+            # 已經存在的話
             entryexit_id = row.entryexit_id
             is_payment = row.payment_status
             if is_payment:
@@ -148,7 +148,8 @@ class VideoCaptureThread(QThread):
             else:
                 self.text_detected.emit("尚未完成付款動作")
         else:
-            # Check monthly rental and reservation statuses
+            # 沒有存在的話
+            # 接下來進入檢查有沒有月租或預定的function
             self.check_parking_status(cursor, plate_text, time_now, frame)
         cursor.close()
         conn.close()
@@ -187,7 +188,7 @@ class VideoCaptureThread(QThread):
             "INSERT INTO EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time) VALUES (?, ?, ?, ?, ?);",
             1, car_id, parktype, f"{plate_text}_{str_time_now}.png", time_now)
         self.save_image(frame, f"{plate_text}_{str_time_now}.png")
-        cv2.imshow("testtest", frame)
+        # cv2.imshow("testtest", frame)
         # print("資料型態:", frame.dtype)
         # print("物件類型:", type(frame))
         # print("影像維度:", frame.shape)
