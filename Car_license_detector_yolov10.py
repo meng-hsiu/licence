@@ -35,6 +35,7 @@ class Ui_Dialog(object):
 class VideoCaptureThread(QThread):
     # 在 PyQt 中定義一個信號,用在 Qt 的事件處理系統中傳遞訊息或事件, 簡單來說就是我拿來傳遞上面的文字啦..
     text_detected = pyqtSignal(str)
+    exit_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -42,7 +43,7 @@ class VideoCaptureThread(QThread):
         self.pause_detection = False
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        # Load models
+        # Load models, 開發模式跟包裝後的model載入路徑是不同的
         base_path = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
         self.vehicle_model = YOLO(os.path.join(base_path, 'yolov10n.pt'),verbose=False).to(self.device)
         self.license_plate_model = YOLO(os.path.join(base_path, 'license_plate_detector.pt'),verbose=False).to(self.device)
@@ -94,7 +95,8 @@ class VideoCaptureThread(QThread):
         # 按q退出後要釋放cv2和webcam的資源
         cap.release()
         cv2.destroyAllWindows()
-        sys.exit()
+        self.exit_signal.emit()
+        sys.exit(1)
 
     # 判斷是否是車子或摩托車
     def detect_vehicle(self, frame, reader):
@@ -121,13 +123,14 @@ class VideoCaptureThread(QThread):
         for res in results:
             text, confidence = res[1], res[2]
             filtered_text = re.sub(r'[^A-Z0-9]', '', text.strip())
-            cv2.putText(frame, filtered_text, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, filtered_text, (x1, max(0, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
             if confidence > 0.8 and 6 <= len(filtered_text) <= 7 and filtered_text != self.last_detected_text:
                 self.last_detected_text = filtered_text
-                self.pause_detection = True
+                # cv2.imshow("Detected the car license", frame)
                 print(f"Detected {filtered_text} with confidence {confidence:.2f}")
                 self.handle_database_interaction(filtered_text, frame)
+                self.pause_detection = True
                 return True
         return False
 
@@ -144,15 +147,25 @@ class VideoCaptureThread(QThread):
         cursor.execute(query_start, f"{plate_text}_%.png")
         row = cursor.fetchone()
 
+        # columns = [column[0] for column in cursor.description]
+        # print("欄位名稱:", columns)
+
         if row:
             # 已經存在的話
             entryexit_id = row.entryexit_id
             is_payment = row.payment_status
             car_id = row.car_id
             valid_time = row.valid_time
+            parktype = row.parktype
             if is_payment:
-                # 已經存在, 且已經繳費, 要檢查有沒有超過出場時間
-                self.check_valid_time(cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time)
+                # 已經存在, 且已經繳費(如果是月租的話, 我在Insert的時候是將繳費狀態設成已繳費), 要檢查是不是月租
+                # 月租檢查完後會銜接檢查有沒有超過最後離場時間的function
+                try:
+                    self.check_is_monthly(cursor, plate_text, time_now, frame,
+                                          entryexit_id, car_id, valid_time, parktype)
+                except Exception as ex:
+                    print(ex)
+                    self.text_detected.emit("出現了繳費問題, 請洽管理員")
             else:
                 # 已經存在, 但沒繳錢
                 self.text_detected.emit("尚未完成付款動作")
@@ -164,18 +177,41 @@ class VideoCaptureThread(QThread):
         cursor.close()
         conn.close()
 
-    # 判斷有沒有超過最後離場時間的function, 其實可以直接寫在上面, 但太醜了
+    # 離場判斷是不是月租的function
+    def check_is_monthly(self, cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time, parktype):
+        if parktype == "MonthlyRental":
+            # 如果是月租, 更新出場時間, 完成, 付款費用, 付款時間, 預計最後離場時間
+            cursor.execute("UPDATE EntryExitManagement "
+                           "SET exit_time = ?, is_finish= ?, amount=?, "
+                           "payment_time=?, valid_time=?, license_plate_keyin_time=? "
+                           "WHERE entryexit_id = ?;",
+                           time_now, 1, 0, time_now, time_now, time_now, entryexit_id)
+            cursor.connection.commit()
+            self.text_detected.emit("謝謝光臨")
+        else:
+            # 不是月租的話進入檢查預計最後離場時間的function
+            self.check_valid_time(cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time)
+
+
+
+    # 判斷有沒有超過最後離場時間的function
     def check_valid_time(self, cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time):
         if valid_time > time_now:
             # 如果沒有超過出場時間
             cursor.execute("UPDATE EntryExitManagement SET exit_time = ?, is_finish= ? WHERE entryexit_id = ?;",
                            time_now, 1, entryexit_id)
-            cursor.connect.commit()
+            cursor.connection.commit()
             self.text_detected.emit("謝謝光臨")
         else:
-            # 如果超過了出場時間, insert一筆新的紀錄, 而這筆的開始時間是他的預計最後離場時間
-            self.insert_entry(cursor, plate_text, valid_time,"Reservation", frame, car_id)
-            self.text_detected.emit("已超過出場時間, 請再繳費一次")
+            try:
+                # 如果超過了出場時間, insert一筆新的紀錄, 而這筆的開始時間是他的預計最後離場時間
+                cursor.execute("UPDATE EntryExitManagement SET exit_time = ?, is_finish= ? WHERE entryexit_id = ?;",
+                               time_now, 1, entryexit_id)
+                cursor.connection.commit()
+                self.insert_entry(cursor, plate_text, valid_time,"Reservation", frame, car_id)
+                self.text_detected.emit("已超過出場時間, 請再繳費一次")
+            except Exception as error:
+                print(error)
 
     # 判斷停車類型的function, 例如有沒有月租, 預定, 如果要加臨停判斷就是加在這的最後一個else那邊
     def check_parking_status(self, cursor, plate_text, time_now, frame):
@@ -221,20 +257,32 @@ class VideoCaptureThread(QThread):
     def insert_entry(self, cursor, plate_text, time_now, parktype, frame, car_id):
         # 先將time_now轉成字串格式, 不然檔案名字沒辦法用DateTime格式
         str_time_now = time_now.strftime("%Y%m%d_%H%M%S")
-        # 停車場預設是1, car_id是當我判斷完月租或預定資料表或超時但沒出場的出入管理時傳入, parktype同上, 照片檔案名字, 現在的時間(超時那邊是傳入Valid_time)
-        cursor.execute(
-            "INSERT INTO EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time) "
-            "VALUES (?, ?, ?, ?, ?);",
-            1, car_id, parktype, f"{plate_text}_{str_time_now}.png", time_now)
-        # 儲存照片, 格式是車牌號碼_時間.png
-        self.save_image(frame, f"{plate_text}_{str_time_now}.png")
-        # 這是我拿來看偵測結果的frame用的
-        # cv2.imshow("testtest", frame)
-        # print("資料型態:", frame.dtype)
-        # print("物件類型:", type(frame))
-        # print("影像維度:", frame.shape)
-        # print("plate_text"+plate_text)
-        cursor.connection.commit()
+
+        # 判斷是不是月租, 如果是月租那他就是已經付款狀態了
+        if parktype == "MonthlyRental":
+            cursor.execute(
+                "INSERT INTO "
+                "EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time, payment_status) "
+                "VALUES (?, ?, ?, ?, ?, ?);",
+                1, car_id, parktype, f"{plate_text}_{str_time_now}.png", time_now, 1)
+            # 儲存照片, 格式是車牌號碼_時間.png
+            self.save_image(frame, f"{plate_text}_{str_time_now}.png")
+            cursor.connection.commit()
+        else:
+            # 停車場預設是1, car_id是當我判斷完月租或預定資料表或超時但沒出場的出入管理時傳入, parktype同上, 照片檔案名字, 現在的時間(超時那邊是傳入Valid_time)
+            cursor.execute(
+                "INSERT INTO "
+                "EntryExitManagement (lot_id, car_id, parktype, license_plate_photo, entry_time, payment_status) "
+                "VALUES (?, ?, ?, ?, ?, ?);",
+                1, car_id, parktype, f"{plate_text}_{str_time_now}.png", time_now, 0)
+            self.save_image(frame, f"{plate_text}_{str_time_now}.png")
+            cursor.connection.commit()
+            # 這是我拿來看偵測結果的frame用的
+            # cv2.imshow("testtest", frame)
+            # print("資料型態:", frame.dtype)
+            # print("物件類型:", type(frame))
+            # print("影像維度:", frame.shape)
+            # print("plate_text"+plate_text)
 
 
 if __name__ == "__main__":
@@ -247,6 +295,7 @@ if __name__ == "__main__":
     video_thread = VideoCaptureThread()
     # 將text_detected跟ui.label.setText連結
     video_thread.text_detected.connect(ui.label.setText)
+    video_thread.exit_signal.connect(app.quit)
 
     try:
         video_thread.start()
