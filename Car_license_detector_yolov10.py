@@ -1,5 +1,5 @@
 # PyQt6 generated code for license.ui
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, uic
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 from ultralytics import YOLO
@@ -12,24 +12,21 @@ from datetime import datetime
 import torch
 
 
-class Ui_Dialog(object):
-    def setupUi(self, Dialog):
-        Dialog.setObjectName("Dialog")
-        Dialog.resize(1118, 435)
-        self.label = QtWidgets.QLabel(parent=Dialog)
-        self.label.setGeometry(QtCore.QRect(80, 60, 971, 271))
-        font = QtGui.QFont()
-        font.setPointSize(50)
-        self.label.setFont(font)
-        self.label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.label.setObjectName("label")
-        self.retranslateUi(Dialog)
-        QtCore.QMetaObject.connectSlotsByName(Dialog)
+class MainApp(QtWidgets.QDialog):
+    def __init__(self):
+        super(MainApp, self).__init__()
+        uic.loadUi("license.ui", self)  # 動態載入 UI
 
-    def retranslateUi(self, Dialog):
-        _translate = QtCore.QCoreApplication.translate
-        Dialog.setWindowTitle(_translate("Dialog", "車牌辨識"))
-        self.label.setText(_translate("Dialog", "正在等待偵測..."))
+        # 設定視窗標題和 UI 元件
+        self.setWindowTitle("車牌辨識")
+        self.label = self.findChild(QtWidgets.QLabel, "label")
+        self.label.setText("正在等待偵測...")
+
+        # 初始化並連接影片擷取執行緒
+        self.video_thread = VideoCaptureThread()
+        self.video_thread.text_detected.connect(self.label.setText)
+        self.video_thread.exit_signal.connect(self.close)
+        self.video_thread.start()  # 啟動執行緒
 
 
 class VideoCaptureThread(QThread):
@@ -287,20 +284,6 @@ class VideoCaptureThread(QThread):
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    Dialog = QtWidgets.QDialog()
-    ui = Ui_Dialog()
-    ui.setupUi(Dialog)
-
-    # 實體化
-    video_thread = VideoCaptureThread()
-    # 將text_detected跟ui.label.setText連結
-    video_thread.text_detected.connect(ui.label.setText)
-    video_thread.exit_signal.connect(app.quit)
-
-    try:
-        video_thread.start()
-        Dialog.show()
-        sys.exit(app.exec())
-    except Exception as e:
-        QtWidgets.QMessageBox.critical(Dialog, "Error", f"An error occurred: {str(e)}")
-        sys.exit(1)
+    window = MainApp()
+    window.show()
+    sys.exit(app.exec())
