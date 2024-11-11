@@ -1,5 +1,5 @@
 # PyQt6 generated code for license.ui
-from PyQt6 import QtCore, QtGui, QtWidgets, uic
+from PyQt6 import QtWidgets, uic
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 from ultralytics import YOLO
@@ -10,6 +10,7 @@ import sys
 import pyodbc
 from datetime import datetime
 import torch
+import configparser
 
 
 class MainApp(QtWidgets.QDialog):
@@ -126,16 +127,32 @@ class VideoCaptureThread(QThread):
                 self.last_detected_text = filtered_text
                 # cv2.imshow("Detected the car license", frame)
                 print(f"Detected {filtered_text} with confidence {confidence:.2f}")
-                self.handle_database_interaction(filtered_text, frame)
+                try:
+                    self.handle_database_interaction(filtered_text, frame)
+                except Exception as e:
+                    print(e)
                 self.pause_detection = True
                 return True
         return False
 
     # 建立資料庫連線與建立各種CRU
     def handle_database_interaction(self, plate_text, frame):
-        # 資料庫連線字串設定
-        conn = pyodbc.connect(
-            "DRIVER={ODBC Driver 17 for SQL Server};SERVER=localhost;DATABASE=EasyPark;Trusted_Connection=yes;")
+        # 資料庫連線字串設定, 改這樣比較不會推到github上導致看到帳密
+        # 讀取配置檔案
+        config = configparser.ConfigParser()
+        config.read('config.ini')
+        # 從配置檔案中獲取連線字串
+        connection_string = (
+            f"Driver={{{config['database']['driver']}}};"
+            f"Server={config['database']['server']};"
+            f"Database={config['database']['database']};"
+            f"Uid={config['database']['uid']};"
+            f"Pwd={config['database']['pwd']};"
+            f"Encrypt={config['database']['encrypt']};"
+            f"TrustServerCertificate={config['database']['trustServerCertificate']};"
+            f"Connection Timeout={config['database']['connectionTimeout']};"
+        )
+        conn = pyodbc.connect(connection_string)
         cursor = conn.cursor()
         time_now = datetime.now()
 
