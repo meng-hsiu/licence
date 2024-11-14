@@ -17,3 +17,17 @@
 
 ## <font color=yellow;>注意事項</font>
 該專案針對小組專題所製作, 所以會連到MSSQL, 因此沒有相應資料庫的人是沒辦法使用此專案的
+<br>
+使用前要先自己創立一個config.ini
+內容大致如下
+```commandline
+[database]
+driver = ODBC Driver 17 for SQL Server
+server = SERVER的位置
+database = 資料庫名字
+uid = SQL帳號
+pwd = SQL密碼
+encrypt = yes
+trustServerCertificate = no
+connectionTimeout = 30
+```
