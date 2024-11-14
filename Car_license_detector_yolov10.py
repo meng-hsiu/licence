@@ -204,9 +204,10 @@ class VideoCaptureThread(QThread):
             self.text_detected.emit("謝謝光臨")
         else:
             # 不是月租的話進入檢查預計最後離場時間的function
-            self.check_valid_time(cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time)
-
-
+            try:
+                self.check_valid_time(cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time)
+            except Exception as error:
+                print(error)
 
     # 判斷有沒有超過最後離場時間的function
     def check_valid_time(self, cursor, plate_text, time_now, frame, entryexit_id, car_id, valid_time):
@@ -214,18 +215,19 @@ class VideoCaptureThread(QThread):
             # 如果沒有超過出場時間
             cursor.execute("UPDATE EntryExitManagement SET exit_time = ?, is_finish= ? WHERE entryexit_id = ?;",
                            time_now, 1, entryexit_id)
+            cursor.execute(
+                "UPDATE ParkingLots SET validSpace = validSpace -1 WHERE lot_id = 1;"
+            )
             cursor.connection.commit()
             self.text_detected.emit("謝謝光臨")
         else:
-            try:
-                # 如果超過了出場時間, insert一筆新的紀錄, 而這筆的開始時間是他的預計最後離場時間
-                cursor.execute("UPDATE EntryExitManagement SET exit_time = ?, is_finish= ? WHERE entryexit_id = ?;",
-                               time_now, 1, entryexit_id)
-                cursor.connection.commit()
-                self.insert_entry(cursor, plate_text, valid_time,"Reservation", frame, car_id)
-                self.text_detected.emit("已超過出場時間, 請再繳費一次")
-            except Exception as error:
-                print(error)
+            # 如果超過了出場時間, insert一筆新的紀錄, 而這筆的開始時間是他的預計最後離場時間
+            cursor.execute("UPDATE EntryExitManagement SET exit_time = ?, is_finish= ? WHERE entryexit_id = ?;",
+                           time_now, 1, entryexit_id)
+            cursor.connection.commit()
+            self.insert_entry(cursor, plate_text, valid_time,"Reservation", frame, car_id)
+            self.text_detected.emit("已超過出場時間, 請再繳費一次")
+
 
     # 判斷停車類型的function, 例如有沒有月租, 預定, 如果要加臨停判斷就是加在這的最後一個else那邊
     def check_parking_status(self, cursor, plate_text, time_now, frame):
